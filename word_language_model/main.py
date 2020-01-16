@@ -6,6 +6,7 @@ import os
 import time
 
 import torch
+import torch.jit
 import torch.nn as nn
 import torch.onnx
 
@@ -64,6 +65,9 @@ parser.add_argument('--save', type=str, default='model.pt',
                     help='path to save the final model')
 parser.add_argument('--onnx-export', type=str, default='',
                     help='path to export the final model in onnx format')
+
+parser.add_argument("--jit_forward", action='store_true',
+                    help="whether or not JIT compile the model's forward function")
 
 parser.add_argument('--nhead', type=int, default=2,
                     help='the number of heads in the encoder/decoder of the transformer model')
@@ -135,6 +139,9 @@ else:
                                inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
                                input_dropout=args.input_dropout, output_dropout=args.output_dropout,
                                tie_weights=args.tied)
+
+if args.jit_forward:
+    model = torch.jit.script(model)
 
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
