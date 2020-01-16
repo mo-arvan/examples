@@ -47,8 +47,8 @@ parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
                     help='random seed')
-parser.add_argument('--cuda', action='store_true',
-                    help='use CUDA')
+parser.add_argument('--device', type=str, default="cpu",
+                    help='device name')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='report interval')
 parser.add_argument('--save', type=str, default='model.pt',
@@ -64,10 +64,10 @@ args = parser.parse_args()
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
-    if not args.cuda:
-        logging.info("WARNING: You have a CUDA device, so you should probably run with --cuda")
+    if "cuda" not in args.device:
+        logging.info("WARNING: You have a CUDA device, run with --device cuda")
 
-device = torch.device("cuda" if args.cuda else "cpu")
+device = torch.device(device=args.device)
 
 ###############################################################################
 # Load data
