@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.onnx
 
 import data
+import lstm
 import model
 
 FORMAT = '%(asctime)-15s, ' + logging.BASIC_FORMAT
@@ -21,7 +22,7 @@ parser = argparse.ArgumentParser(description='PyTorch Wikitext-2 RNN/LSTM Langua
 parser.add_argument('--data', type=str, default='./data/wikitext-2',
                     help='location of the data corpus')
 parser.add_argument('--model', type=str, default='LSTM',
-                    help='type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer)')
+                    help='type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer, custom_LSTM)')
 parser.add_argument('--emsize', type=int, default=200,
                     help='size of word embeddings')
 parser.add_argument('--nhid', type=int, default=200,
@@ -38,8 +39,19 @@ parser.add_argument('--batch_size', type=int, default=20, metavar='N',
                     help='batch size')
 parser.add_argument('--bptt', type=int, default=35,
                     help='sequence length')
-parser.add_argument('--dropout', type=float, default=0.2,
-                    help='dropout applied to layers (0 = no dropout)')
+
+parser.add_argument('--dropout', type=float, default=0.,
+                    help='dropout applied to layers only in the Transformer model(0 = no dropout)')
+
+parser.add_argument('--inter_layer_dropout', type=float, default=0.,
+                    help='dropout applied to inter layer connection of each LSTM layer')
+parser.add_argument('--recurrent_dropout', type=float, default=0.,
+                    help='dropout applied to the recurrent state of of each LSTM layer')
+parser.add_argument('--input_dropout', type=float, default=0.,
+                    help='dropout applied to the input of LSTM')
+parser.add_argument('--output_dropout', type=float, default=0.,
+                    help='dropout applied to the output of the LSTM')
+
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
@@ -62,7 +74,7 @@ args = parser.parse_args()
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
     if "cuda" not in args.device:
-        logging.info("WARNING: You have a CUDA device, run with --device cuda")
+        logging.warning("You have a CUDA device, run with --device cuda")
 
 device = torch.device(device=args.device)
 
@@ -106,11 +118,25 @@ test_data = batchify(corpus.test, eval_batch_size)
 
 ntokens = len(corpus.dictionary)
 if args.model == 'Transformer':
-    model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout).to(device)
+    model = model.TransformerModel(ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout)
 else:
-    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers, args.dropout, args.tied).to(
-        device)
+    if args.dropout > 0.:
+        logging.warning("dropout argument is not used in the LSTM models")
+    if args.model == "custom_LSTM":
+        model = lstm.RNNLM(num_tokens=ntokens, input_size=args.emsize, hidden_size=args.nhid,
+                           num_layers=args.nlayers, bias=True,
+                           inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
+                           input_dropout=args.input_dropout, output_dropout=args.output_dropout,
+                           tie_weights=args.tied)
+    else:
+        if args.recurrent_dropout > 0.:
+            logging.warning("recurrent_dropout argument is only used in the custom LSTM model")
+        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
+                               inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
+                               input_dropout=args.input_dropout, output_dropout=args.output_dropout,
+                               tie_weights=args.tied)
 
+model = model.to(device)
 criterion = nn.CrossEntropyLoss()
 
 
