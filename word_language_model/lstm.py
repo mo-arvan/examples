@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import Tuple, List, Optional
 
 """
 Implementation of LSTM model described in On the State of the Art of Evaluation in Neural Language Models
@@ -15,11 +15,11 @@ class LSTM(nn.Module):
   The LSTM expects the input to be batch first: Batch size x length
   The LSTM does not support bidirectional as an argument
   """
-  __constants__ = ['layers', 'hidden_size', 'skip_connection']
+  __constants__ = ['layers']
 
   def __init__(self, input_size, hidden_size,
                num_layers=1, bias=True,
-               inter_layer_dropout=0., recurrent_dropout=0.,
+               inter_layer_dropout=0.1, recurrent_dropout=0.,
                skip_connection=False):
     super(LSTM, self).__init__()
 
@@ -38,7 +38,8 @@ class LSTM(nn.Module):
     self.hidden_size = hidden_size
     self.skip_connection = skip_connection
 
-  def forward(self, input: torch.Tensor, hx: Tuple[torch.Tensor, torch.Tensor] = None):
+  def forward(self, input: torch.Tensor, hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
+    torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
 
     :param input: batch size x length x input_size
@@ -47,14 +48,29 @@ class LSTM(nn.Module):
     """
     input_length = input.shape[1]
     batch_size = input.shape[0]
-    # time x num_layers x batch_size x hidden_state
-    lstm_h_list, lstm_c_list = input.new_full(size=(input_length + 1, self.num_layers,
-                                                    batch_size, self.hidden_size), fill_value=0.), \
-                               input.new_full(size=(input_length + 1, self.num_layers,
-                                                    batch_size, self.hidden_size), fill_value=0.)
 
-    lstm_h_list[0] = hx[0]
-    lstm_c_list[0] = hx[1]
+    if hx is None:
+      zeros = torch.zeros(self.num_layers,
+                          batch_size, self.hidden_size,
+                          dtype=input.dtype, device=input.device)
+      hx = (zeros, zeros)
+
+    # time x num_layers x batch_size x hidden_state
+    # lstm_h_list, lstm_c_list = input.new_full(size=(input_length + 1, self.num_layers,
+    #                                                 batch_size, self.hidden_size), fill_value=0.), \
+    #                            input.new_full(size=(input_length + 1, self.num_layers,
+    #                                                 batch_size, self.hidden_size), fill_value=0.)
+    length_dim_tensor = hx[0][0]
+    lstm_h_list: List[List[torch.Tensor]] = [[torch.zeros_like(length_dim_tensor)] * self.num_layers] * (
+        input_length + 1)
+    lstm_c_list: List[List[torch.Tensor]] = [[torch.zeros_like(length_dim_tensor)] * self.num_layers] * (
+        input_length + 1)
+
+    # lstm_h_list[0] = hx[0]
+    # lstm_c_list[0] = hx[1]
+
+    lstm_h_list[0] = hx[0].unbind(dim=0)
+    lstm_c_list[0] = hx[1].unbind(dim=0)
 
     layer_index = -1
     for layer in self.layers:
@@ -70,6 +86,9 @@ class LSTM(nn.Module):
         h_1, c_1 = layer(lstm_input, (h_0, c_0))
         lstm_h_list[index + 1][layer_index] = h_1
         lstm_c_list[index + 1][layer_index] = c_1
+
+    lstm_h_list = torch.stack([torch.stack(l) for l in lstm_h_list])
+    lstm_c_list = torch.stack([torch.stack(l) for l in lstm_c_list])
 
     output = lstm_h_list[1:]
 
@@ -123,7 +142,7 @@ class RNNLM(nn.Module):
     self.decoder.bias.data.zero_()
     self.decoder.weight.data.uniform_(-initrange, initrange)
 
-  def forward(self, input, hidden):
+  def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None):
     """
 
     :param input: batch size x length
