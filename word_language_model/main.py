@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.onnx
 
 import data
-import lstm
 import model
 
 FORMAT = '%(asctime)-15s, ' + logging.BASIC_FORMAT
@@ -126,19 +125,11 @@ if args.model == 'Transformer':
 else:
     if args.dropout > 0.:
         logging.warning("dropout argument is not used in the LSTM models")
-    if args.model == "custom_LSTM":
-        model = lstm.RNNLM(num_tokens=ntokens, input_size=args.emsize, hidden_size=args.nhid,
-                           num_layers=args.nlayers, bias=True,
+
+    model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
                            inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
                            input_dropout=args.input_dropout, output_dropout=args.output_dropout,
                            tie_weights=args.tied)
-    else:
-        if args.recurrent_dropout > 0.:
-            logging.warning("recurrent_dropout argument is only used in the custom LSTM model")
-        model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
-                               inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
-                               input_dropout=args.input_dropout, output_dropout=args.output_dropout,
-                               tie_weights=args.tied)
 
 if args.jit_forward:
     model = torch.jit.script(model)

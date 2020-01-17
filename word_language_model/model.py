@@ -1,8 +1,11 @@
+import logging
 import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+import lstm
 
 
 class RNNModel(nn.Module):
@@ -15,7 +18,15 @@ class RNNModel(nn.Module):
         self.input_dropout = nn.Dropout(input_dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
         if rnn_type in ['LSTM', 'GRU']:
+            if recurrent_dropout > 0.:
+                logging.warning("recurrent_dropout argument is only used in the custom LSTM model")
+
             self.rnn = getattr(nn, rnn_type)(ninp, nhid, nlayers, dropout=inter_layer_dropout)
+        elif rnn_type == "custom_LSTM":
+            self.rnn = lstm.LSTM(ninp, nhid,
+                                 nlayers, bias=True,
+                                 inter_layer_dropout=inter_layer_dropout, recurrent_dropout=recurrent_dropout,
+                                 skip_connection=False, batch_first=False)
         else:
             try:
                 nonlinearity = {'RNN_TANH': 'tanh', 'RNN_RELU': 'relu'}[rnn_type]
@@ -59,7 +70,7 @@ class RNNModel(nn.Module):
 
     def init_hidden(self, bsz):
         weight = next(self.parameters())
-        if self.rnn_type == 'LSTM':
+        if self.rnn_type in ['LSTM', "custom_LSTM"]:
             return (weight.new_zeros(self.nlayers, bsz, self.nhid),
                     weight.new_zeros(self.nlayers, bsz, self.nhid))
         else:
