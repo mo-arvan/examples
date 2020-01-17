@@ -52,6 +52,8 @@ parser.add_argument('--input_dropout', type=float, default=0.,
 parser.add_argument('--output_dropout', type=float, default=0.,
                     help='dropout applied to the output of the LSTM')
 
+parser.add_argument('--lstm_skip_connection', action='store_true',
+                    help='Summing the output of all the LSTM layers instead of returning the last one')
 parser.add_argument('--tied', action='store_true',
                     help='tie the word embedding and softmax weights')
 parser.add_argument('--seed', type=int, default=1111,
@@ -127,9 +129,9 @@ else:
         logging.warning("dropout argument is not used in the LSTM models")
 
     model = model.RNNModel(args.model, ntokens, args.emsize, args.nhid, args.nlayers,
-                           inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.inter_layer_dropout,
+                           inter_layer_dropout=args.inter_layer_dropout, recurrent_dropout=args.recurrent_dropout,
                            input_dropout=args.input_dropout, output_dropout=args.output_dropout,
-                           tie_weights=args.tied)
+                           tie_weights=args.tied, lstm_skip_connection=args.lstm_skip_connection)
 
 if args.jit_forward:
     model = torch.jit.script(model)

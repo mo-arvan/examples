@@ -1,5 +1,6 @@
 import logging
 import math
+from typing import Tuple, Optional
 
 import torch
 import torch.nn as nn
@@ -13,7 +14,8 @@ class RNNModel(nn.Module):
 
     def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers,
                  inter_layer_dropout=0., recurrent_dropout=0.,
-                 input_dropout=0., output_dropout=0., tie_weights=False):
+                 input_dropout=0., output_dropout=0., tie_weights=False,
+                 lstm_skip_connection=False):
         super(RNNModel, self).__init__()
         self.input_dropout = nn.Dropout(input_dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
@@ -26,7 +28,7 @@ class RNNModel(nn.Module):
             self.rnn = lstm.LSTM(ninp, nhid,
                                  nlayers, bias=True,
                                  inter_layer_dropout=inter_layer_dropout, recurrent_dropout=recurrent_dropout,
-                                 skip_connection=False, batch_first=False)
+                                 skip_connection=lstm_skip_connection, batch_first=False)
         else:
             try:
                 nonlinearity = {'RNN_TANH': 'tanh', 'RNN_RELU': 'relu'}[rnn_type]
@@ -61,7 +63,8 @@ class RNNModel(nn.Module):
         self.decoder.bias.data.zero_()
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, input, hidden):
+    def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
+        torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         emb = self.input_dropout(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.output_dropout(output)
