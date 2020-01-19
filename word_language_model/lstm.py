@@ -2,9 +2,11 @@ from typing import Tuple, List, Optional
 
 import torch
 import torch.nn as nn
+import sequence_dropout
 
 """
-Implementation of LSTM model described in On the State of the Art of Evaluation in Neural Language Models
+Implementation of LSTM model described in On the State of the Art of
+Evaluation in Neural Language Models
 https://arxiv.org/abs/1707.05589
 """
 
@@ -14,32 +16,47 @@ class LSTM(nn.Module):
     The LSTM expects the input to be batch first: Batch size x length
     The LSTM does not support bidirectional as an argument
     """
-    __constants__ = ['layers']
 
-    def __init__(self, input_size, hidden_size,
-                 num_layers=1, bias=True,
-                 inter_layer_dropout=0.1, recurrent_dropout=0.,
-                 skip_connection=False, batch_first=False):
+    __constants__ = ["layers"]
+
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers=1,
+        bias=True,
+        inter_layer_dropout=0.1,
+        recurrent_dropout=0.0,
+        skip_connection=False,
+        batch_first=False,
+    ):
         super(LSTM, self).__init__()
 
-        assert num_layers >= 1 and inter_layer_dropout >= 0. and recurrent_dropout >= 0.
+        assert (
+            num_layers >= 1 and inter_layer_dropout >= 0.0 and recurrent_dropout >= 0.0
+        )
 
-        self.layers = nn.ModuleList([
-            nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, bias=bias)
-        ])
+        self.layers = nn.ModuleList(
+            [nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, bias=bias)]
+        )
         for layer in range(num_layers - 1):
-            self.layers.append(nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, bias=bias))
+            self.layers.append(
+                nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, bias=bias)
+            )
 
         self.inter_layer_dropout = nn.Dropout(p=inter_layer_dropout)
-        self.recurrent_dropout = nn.Dropout(p=recurrent_dropout)
+        self.recurrent_dropout = sequence_dropout.SequenceDropout(p=recurrent_dropout)
 
         self.num_layers = num_layers
         self.hidden_size = hidden_size
         self.skip_connection = skip_connection
         self.batch_first = batch_first
 
-    def forward(self, input: torch.Tensor, hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
-        torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(
+        self,
+        input: torch.Tensor,
+        hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
 
         :param input: batch size x length x input_size
@@ -52,9 +69,13 @@ class LSTM(nn.Module):
         batch_size = input.shape[0]
 
         if hx is None:
-            zeros = torch.zeros(self.num_layers,
-                                batch_size, self.hidden_size,
-                                dtype=input.dtype, device=input.device)
+            zeros = torch.zeros(
+                self.num_layers,
+                batch_size,
+                self.hidden_size,
+                dtype=input.dtype,
+                device=input.device,
+            )
             hx = (zeros, zeros)
 
         length_dim_tensor = hx[0][0]
@@ -77,13 +98,17 @@ class LSTM(nn.Module):
         layer_index = -1
         for layer in self.layers:
             layer_index += 1
+            self.recurrent_dropout.generate_new_mask()
             for index in range(input_length):
                 if layer_index == 0:
                     lstm_input = input.select(dim=1, index=index)
                 else:
                     lstm_input = lstm_h_list[index + 1][layer_index - 1]
                     lstm_input = self.inter_layer_dropout(lstm_input)
-                h_0, c_0 = lstm_h_list[index][layer_index], lstm_c_list[index][layer_index]
+                h_0, c_0 = (
+                    lstm_h_list[index][layer_index],
+                    lstm_c_list[index][layer_index],
+                )
                 h_0, c_0 = self.recurrent_dropout(h_0), self.recurrent_dropout(c_0)
                 h_1, c_1 = layer(lstm_input, (h_0, c_0))
                 lstm_h_list[index + 1][layer_index] = h_1.clone()
