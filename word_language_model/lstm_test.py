@@ -144,8 +144,8 @@ class CustomLSTMTest(unittest.TestCase):
         torch_output, torch_hidden = torch_lstm(input, hx)
         custom_output, custom_hidden = custom_lstm_forward(input, hx)
 
-        torch_output.sum().backward()
-        custom_output.sum().backward()
+        torch_output.pow(2).sum().backward()
+        custom_output.pow(2).sum().backward()
 
         torch_testing.assert_allclose(torch_hidden[0], custom_hidden[0])
         torch_testing.assert_allclose(torch_hidden[1], custom_hidden[1])
