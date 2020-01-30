@@ -4,12 +4,12 @@ import logging
 import math
 import os
 import time
-import torch.optim
 
 import torch
 import torch.jit
 import torch.nn as nn
 import torch.onnx
+import torch.optim
 
 import data
 import model
@@ -165,11 +165,19 @@ train_data = batchify(corpus.train, args.batch_size)
 val_data = batchify(corpus.valid, eval_batch_size)
 test_data = batchify(corpus.test, eval_batch_size)
 
+
 ###############################################################################
 # Build the model
 ###############################################################################
 
-ntokens = len(corpus.dictionary)
+def get_ntokens(corpus):
+    n = len(corpus.dictionary)
+    if n % 8 != 0:
+        n = (n // 8 + 1) * 8
+    return n
+
+
+ntokens = get_ntokens(corpus)
 if args.model == "Transformer":
     model = model.TransformerModel(
         ntokens, args.emsize, args.nhead, args.nhid, args.nlayers, args.dropout
@@ -269,7 +277,7 @@ def evaluate(data_source):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.0
-    ntokens = len(corpus.dictionary)
+    ntokens = get_ntokens(corpus)
     if args.model != "Transformer":
         hidden = model.init_hidden(eval_batch_size)
     with torch.no_grad():
@@ -290,7 +298,7 @@ def train():
     model.train()
     total_loss = 0.0
     start_time = time.time()
-    ntokens = len(corpus.dictionary)
+    ntokens = get_ntokens(corpus)
     if args.model != "Transformer":
         hidden = model.init_hidden(args.batch_size)
     for batch, i in enumerate(range(0, train_data.size(0) - 1, args.bptt)):
