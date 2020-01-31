@@ -38,8 +38,8 @@ class RNNModel(nn.Module):
             self.rnn = nn.RNN(ninp, nhid, nlayers, nonlinearity=nonlinearity, dropout=inter_layer_dropout)
         self.output_dropout = nn.Dropout(output_dropout)
 
-        self.decoder = nn.Linear(nhid, ntoken)
-
+        decoder_list = []
+        linear_layer = nn.Linear(ninp, ntoken)
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
         # https://arxiv.org/abs/1608.05859
@@ -48,8 +48,14 @@ class RNNModel(nn.Module):
         # https://arxiv.org/abs/1611.01462
         if tie_weights:
             if nhid != ninp:
-                raise ValueError('When using the tied flag, nhid must be equal to emsize')
-            self.decoder.weight = self.encoder.weight
+                logging.info(
+                    "Adding additional linear layer to transform hidden size to embedding size"
+                )
+                decoder_list.append(nn.Linear(nhid, ninp))
+            linear_layer.weight = self.encoder.weight
+
+        decoder_list.append(linear_layer)
+        self.decoder = nn.Sequential(*decoder_list)
 
         self.init_weights()
 
@@ -60,8 +66,9 @@ class RNNModel(nn.Module):
     def init_weights(self):
         initrange = 0.1
         self.encoder.weight.data.uniform_(-initrange, initrange)
-        self.decoder.bias.data.zero_()
-        self.decoder.weight.data.uniform_(-initrange, initrange)
+        for m in self.decoder:
+            m.bias.data.zero_()
+            m.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
