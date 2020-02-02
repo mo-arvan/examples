@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(
     description="PyTorch Wikitext-2 RNN/LSTM Language Model"
 )
 parser.add_argument(
-    "--data", type=str, default="./data/wikitext-2", help="location of the data corpus"
+    "--data", type=str, default="./data/ptb", help="location of the data corpus"
 )
 parser.add_argument(
     "--model",
@@ -38,7 +38,7 @@ parser.add_argument(
 parser.add_argument("--nlayers", type=int, default=2, help="number of layers")
 
 parser.add_argument("--lr", type=float, default=0.001, help="initial learning rate")
-parser.add_argument("--clip", type=float, default=0.25, help="gradient clipping")
+parser.add_argument("--clip", type=float, default=10, help="gradient clipping")
 parser.add_argument(
     "--weight_decay",
     type=float,
@@ -52,7 +52,7 @@ parser.add_argument(
 
 parser.add_argument("--epochs", type=int, default=40, help="upper epoch limit")
 parser.add_argument(
-    "--batch_size", type=int, default=20, metavar="N", help="batch size"
+    "--batch_size", type=int, default=64, metavar="N", help="batch size"
 )
 parser.add_argument("--bptt", type=int, default=35, help="sequence length")
 
@@ -178,6 +178,7 @@ def batchify(data, bsz):
 
 eval_batch_size = 10
 train_data = batchify(corpus.train, args.batch_size)
+train_eval_data = batchify(corpus.train, g)
 val_data = batchify(corpus.valid, eval_batch_size)
 test_data = batchify(corpus.test, eval_batch_size)
 
@@ -225,14 +226,29 @@ criterion = nn.CrossEntropyLoss()
 n = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 logger.info("Number of trainable parameters: {}".format(n))
-# no_decay = []  # ['bias', 'LayerNorm.weight']
-# # will use default weight decay value
-# optimizer_grouped_parameters = [
-#     {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-#      "weight_decay": args.weight_decay},
-#     {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-#      'weight_decay': 0.0}
-# ]
+logger.info('Args: {}'.format(args.__str__()))
+
+
+def get_param_weight_decay_dict(param_group_name_list):
+    return [
+        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in param_group_name_list)],
+         "weight_decay": args.weight_decay},
+        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in param_group_name_list)],
+         'weight_decay': 0.0}
+    ]
+
+
+no_decay_weights = []
+if args.weight_decay_mode == "all":
+    pass
+elif args.weight_decay_mode == "all_except_bias":
+    no_decay_weights = ["bias"]
+elif args.weight_decay_mode == "all_except_bias_embedding":
+    no_decay_weights = ["bias", "encoder"]
+else:
+    raise ValueError("Invalid argument for weight_decay_mode: {}".format(args.weight_decay_mode))
+
+optimizer_grouped_parameters = get_param_weight_decay_dict(no_decay_weights)
 
 optimizer = torch.optim.Adam(
     params=optimizer_grouped_parameters,
@@ -283,8 +299,8 @@ def repackage_hidden(h):
 
 def get_batch(source, i):
     seq_len = min(args.bptt, len(source) - 1 - i)
-    data = source[i : i + seq_len]
-    target = source[i + 1 : i + 1 + seq_len].view(-1)
+    data = source[i: i + seq_len]
+    target = source[i + 1: i + 1 + seq_len].view(-1)
     return data, target
 
 
