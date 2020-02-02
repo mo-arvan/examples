@@ -46,6 +46,10 @@ parser.add_argument(
     help="weight decay used for regularizing the model",
 )
 
+parser.add_argument(
+    "--weight_decay_mode", type=str, default="all", help="all, all_except_bias, all_except_bias_embedding"
+)
+
 parser.add_argument("--epochs", type=int, default=40, help="upper epoch limit")
 parser.add_argument(
     "--batch_size", type=int, default=20, metavar="N", help="batch size"
@@ -119,6 +123,18 @@ parser.add_argument(
     default=2,
     help="the number of heads in the encoder/decoder of the transformer model",
 )
+
+parser.add_argument("--lr_schedule_mode", type=str, default="min")
+parser.add_argument("--lr_schedule_factor", type=float, default=0.5)
+parser.add_argument("--lr_schedule_patience", type=int, default=15)
+parser.add_argument("--lr_schedule_verbose", type=bool, default=True)
+parser.add_argument("--lr_schedule_threshold", type=float, default=.01)
+parser.add_argument("--lr_schedule_threshold_mode", type=str, default="abs")
+parser.add_argument("--lr_schedule_cooldown", type=int, default=0)
+parser.add_argument("--lr_schedule_min_lr", type=float, default=0.0005)
+parser.add_argument("--lr_schedule_eps", type=float, default=1e-08)
+
+parser.add_argument("--lr_asgd", type=float, default=7.5)
 
 args = parser.parse_args()
 
@@ -219,24 +235,23 @@ logger.info("Number of trainable parameters: {}".format(n))
 # ]
 
 optimizer = torch.optim.Adam(
-    params=model.parameters(),
+    params=optimizer_grouped_parameters,
     lr=args.lr,
     betas=(0.0, 0.999),
     eps=1e-9,
-    weight_decay=args.weight_decay,
 )
 
 lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
-    mode="min",
-    factor=0.5,
-    patience=2,
-    verbose=True,
-    threshold=0.0001,
-    threshold_mode="abs",
-    cooldown=0,
-    min_lr=0.00001,
-    eps=1e-08,
+    mode=args.lr_schedule_mode,
+    factor=args.lr_schedule_factor,
+    patience=args.lr_schedule_patience,
+    verbose=args.lr_schedule_verbose,
+    threshold=args.lr_schedule_threshold,
+    threshold_mode=args.lr_schedule_threshold_mode,
+    cooldown=args.lr_schedule_cooldown,
+    min_lr=args.lr_schedule_min_lr,
+    eps=args.lr_schedule_eps,
 )
 
 
@@ -386,6 +401,30 @@ try:
                     f,
                 )
             best_val_loss = val_loss
+
+        # if isinstance(optimizer, torch.optim.Adam) and (epoch > .8 * args.epochs or
+        #                                                 lr_scheduler.optimizer.param_groups[0][
+        #                                                     "lr"] == args.lr_schedule_min_lr):
+        #     print('Switching to ASGD')
+        #     optimizer = torch.optim.ASGD(
+        #         params=model.parameters(),
+        #         lr=args.lr_asgd,
+        #         t0=0,
+        #         lambd=0.,
+        #         weight_decay=args.weight_decay,
+        #     )
+        #     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        #         optimizer,
+        #         mode=args.lr_schedule_mode,
+        #         factor=args.lr_schedule_factor,
+        #         patience=args.lr_schedule_patience,
+        #         verbose=args.lr_schedule_verbose,
+        #         threshold=args.lr_schedule_threshold,
+        #         threshold_mode=args.lr_schedule_threshold_mode,
+        #         cooldown=args.lr_schedule_cooldown,
+        #         min_lr=args.lr_schedule_min_lr,
+        #         eps=args.lr_schedule_eps,
+        #     )
         # else:
         #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
         #     # lr /= 4.0
