@@ -99,7 +99,7 @@ parser.add_argument(
 parser.add_argument("--seed", type=int, default=1111, help="random seed")
 parser.add_argument("--device", type=str, default="cpu", help="device name")
 parser.add_argument(
-    "--log-interval", type=int, default=200, metavar="N", help="report interval"
+    "--log-interval", type=int, default=207, metavar="N", help="report interval"
 )
 parser.add_argument(
     "--save", type=str, default="model.pt", help="path to save the final model"
@@ -177,10 +177,11 @@ def batchify(data, bsz):
 
 
 eval_batch_size = 10
+test_batch_size = 1
+
 train_data = batchify(corpus.train, args.batch_size)
-train_eval_data = batchify(corpus.train, g)
 val_data = batchify(corpus.valid, eval_batch_size)
-test_data = batchify(corpus.test, eval_batch_size)
+test_data = batchify(corpus.test, test_batch_size)
 
 
 ###############################################################################
@@ -245,6 +246,8 @@ elif args.weight_decay_mode == "all_except_bias":
     no_decay_weights = ["bias"]
 elif args.weight_decay_mode == "all_except_bias_embedding":
     no_decay_weights = ["bias", "encoder"]
+elif args.weight_decay_mode == "only_embedding":
+    no_decay_weights = [n for n, p in model.named_parameters() if "encoder" in n]
 else:
     raise ValueError("Invalid argument for weight_decay_mode: {}".format(args.weight_decay_mode))
 
@@ -304,13 +307,14 @@ def get_batch(source, i):
     return data, target
 
 
-def evaluate(data_source):
+def evaluate(data_source, batch_size):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.0
     ntokens = get_ntokens(corpus)
     if args.model != "Transformer":
-        hidden = model.init_hidden(eval_batch_size)
+        hidden = model.init_hidden(batch_size)
+    probabilities = []
     with torch.no_grad():
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data, targets = get_batch(data_source, i)
@@ -321,6 +325,14 @@ def evaluate(data_source):
                 hidden = repackage_hidden(hidden)
             output_flat = output.view(-1, ntokens)
             total_loss += len(data) * criterion(output_flat, targets).item()
+            output_prob_flat = output_flat.softmax(dim=1)
+            probabilities += [output_prob_flat[i][targets[i]].item() for i in range(targets.size(0))]
+
+    probabilities = torch.tensor(probabilities)
+    min_prob = torch.min(probabilities).item()
+    max_prob = torch.max(probabilities).item()
+    median_prob = torch.median(probabilities).item()
+    logger.info("Min: {}, Max: {}, Median: {}".format(min_prob, max_prob, median_prob))
     return total_loss / (len(data_source) - 1)
 
 
@@ -353,7 +365,6 @@ def train():
         optimizer.step()
 
         total_loss += loss.item()
-
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss / args.log_interval
             elapsed = time.time() - start_time
@@ -395,7 +406,7 @@ try:
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
-        val_loss = evaluate(val_data)
+        val_loss = evaluate(val_data, eval_batch_size)
         logging.info("-" * 89)
         logging.info(
             "| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | "
@@ -460,7 +471,7 @@ with open(args.save, "rb") as f:
         model.rnn.flatten_parameters()
 
 # Run on test data.
-test_loss = evaluate(test_data)
+test_loss = evaluate(test_data, test_batch_size)
 logging.info("=" * 89)
 logging.info(
     "| End of training | test loss {:5.2f} | test ppl {:8.2f}".format(

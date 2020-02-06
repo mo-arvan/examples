@@ -39,7 +39,7 @@ class RNNModel(nn.Module):
         self.output_dropout = nn.Dropout(output_dropout)
 
         decoder_list = []
-        linear_layer = nn.Linear(ninp, ntoken)
+        linear_layer = nn.Linear(ninp, ntoken, bias=False)
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
         # https://arxiv.org/abs/1608.05859
@@ -67,7 +67,8 @@ class RNNModel(nn.Module):
         initrange = 0.1
         self.encoder.weight.data.uniform_(-initrange, initrange)
         for m in self.decoder:
-            m.bias.data.zero_()
+            if m.bias is not None:
+                m.bias.data.zero_()
             m.weight.data.uniform_(-initrange, initrange)
 
     def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
