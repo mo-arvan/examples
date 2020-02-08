@@ -1,5 +1,6 @@
 # coding: utf-8
 import argparse
+import datetime
 import logging
 import math
 import os
@@ -13,11 +14,6 @@ import torch.optim
 
 import data
 import model
-
-FORMAT = "%(asctime)-15s, " + logging.BASIC_FORMAT
-logging.basicConfig(format=FORMAT)
-logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
 
 parser = argparse.ArgumentParser(
     description="PyTorch Wikitext-2 RNN/LSTM Language Model"
@@ -141,6 +137,37 @@ parser.add_argument("--up_project_hidden", type=bool, default=False)
 
 args = parser.parse_args()
 
+
+def _default_output_dir():
+    try:
+        dataset_name = args.data
+    except ValueError:
+        dataset_name = "unknown"
+    dir_name = "{model_name}_{dataset_name}_{timestamp}".format(
+        model_name=args.model,
+        dataset_name=dataset_name.replace("/", "_"),
+        timestamp=datetime.datetime.now().strftime("%Y%m%d_%H%M"),
+    )
+    dir_path = os.path.join(".", "out", dir_name)
+    return dir_path
+
+
+output_dir = _default_output_dir()
+output_dir = os.path.expanduser(output_dir)
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+logging.basicConfig(filename="output_log",
+                    filemode='a',
+                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.DEBUG)
+logging.getLogger().setLevel(logging.DEBUG)
+
+file_handler = logging.FileHandler(output_dir + '/output.log')
+file_handler.setLevel(logging.DEBUG)
+logging.getLogger().addHandler(file_handler)
+
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
@@ -231,8 +258,8 @@ criterion = nn.CrossEntropyLoss()
 
 n = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-logger.info("Number of trainable parameters: {}".format(n))
-logger.info('Args: {}'.format(args.__str__()))
+logging.info("Number of trainable parameters: {}".format(n))
+logging.info('Args: {}'.format(args.__str__()))
 
 
 def get_param_weight_decay_dict(param_group_name_list):
@@ -337,7 +364,7 @@ def evaluate(data_source, batch_size):
     min_prob = torch.min(probabilities).item()
     max_prob = torch.max(probabilities).item()
     median_prob = torch.median(probabilities).item()
-    logger.info("Min: {}, Max: {}, Median: {}".format(min_prob, max_prob, median_prob))
+    logging.info("Min: {}, Max: {}, Median: {}".format(min_prob, max_prob, median_prob))
     return total_loss / (len(data_source) - 1)
 
 
