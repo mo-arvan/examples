@@ -136,6 +136,9 @@ parser.add_argument("--lr_schedule_eps", type=float, default=1e-08)
 
 parser.add_argument("--lr_asgd", type=float, default=7.5)
 
+parser.add_argument("--up_project_embedding", type=bool, default=False)
+parser.add_argument("--up_project_hidden", type=bool, default=False)
+
 args = parser.parse_args()
 
 # Set the random seed manually for reproducibility.
@@ -205,15 +208,17 @@ else:
         logging.warning("dropout argument is not used in the LSTM models")
 
     model = model.RNNModel(
-        args.model,
-        ntokens,
-        args.emsize,
-        args.nhid,
-        args.nlayers,
+        rnn_type=args.model,
+        num_tokens=ntokens,
+        embedding_size=args.emsize,
+        hidden_size=args.nhid,
+        num_layers=args.nlayers,
         inter_layer_dropout=args.inter_layer_dropout,
         recurrent_dropout=args.recurrent_dropout,
         input_dropout=args.input_dropout,
         output_dropout=args.output_dropout,
+        up_project_embedding=args.up_project_embedding,
+        up_project_hidden=args.up_project_hidden,
         tie_weights=args.tied,
         lstm_skip_connection=args.lstm_skip_connection,
     )

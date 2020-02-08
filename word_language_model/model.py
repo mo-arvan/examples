@@ -12,21 +12,39 @@ import lstm
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers,
+    def __init__(self, rnn_type, num_tokens,
+                 embedding_size, hidden_size,
+                 num_layers,
                  inter_layer_dropout=0., recurrent_dropout=0.,
-                 input_dropout=0., output_dropout=0., tie_weights=False,
+                 input_dropout=0., output_dropout=0.,
+                 up_project_embedding=False,
+                 up_project_hidden=False,
+                 tie_weights=False,
                  lstm_skip_connection=False):
         super(RNNModel, self).__init__()
+
         self.input_dropout = nn.Dropout(input_dropout)
-        self.encoder = nn.Embedding(ntoken, ninp)
+
+        encoder_layer_list = []
+        embedding_layer = nn.Embedding(num_tokens, embedding_size)
+
+        encoder_layer_list.append(embedding_layer)
+        if embedding_size != hidden_size and up_project_embedding:
+            logging.info("Encoder: adding linear transformation to up project embedding to hidden")
+            encoder_layer_list.append(nn.Linear(embedding_size, hidden_size, bias=False))
+            rnn_input_size = hidden_size
+        else:
+            rnn_input_size = embedding_size
+        self.encoder = nn.Sequential(*encoder_layer_list)
+
         if rnn_type in ['LSTM', 'GRU']:
             if recurrent_dropout > 0.:
                 logging.warning("recurrent_dropout argument is only used in the custom LSTM model")
 
-            self.rnn = getattr(nn, rnn_type)(ninp, nhid, nlayers, dropout=inter_layer_dropout)
+            self.rnn = getattr(nn, rnn_type)(rnn_input_size, hidden_size, num_layers, dropout=inter_layer_dropout)
         elif rnn_type == "custom_LSTM":
-            self.rnn = lstm.LSTM(ninp, nhid,
-                                 nlayers, bias=True,
+            self.rnn = lstm.LSTM(rnn_input_size, hidden_size,
+                                 num_layers, bias=True,
                                  inter_layer_dropout=inter_layer_dropout, recurrent_dropout=recurrent_dropout,
                                  skip_connection=lstm_skip_connection, batch_first=False)
         else:
@@ -35,48 +53,69 @@ class RNNModel(nn.Module):
             except KeyError:
                 raise ValueError("""An invalid option for `--model` was supplied,
                                  options are ['LSTM', 'GRU', 'RNN_TANH' or 'RNN_RELU']""")
-            self.rnn = nn.RNN(ninp, nhid, nlayers, nonlinearity=nonlinearity, dropout=inter_layer_dropout)
+            self.rnn = nn.RNN(rnn_input_size, hidden_size, num_layers, nonlinearity=nonlinearity,
+                              dropout=inter_layer_dropout)
         self.output_dropout = nn.Dropout(output_dropout)
 
         decoder_list = []
-        linear_layer = nn.Linear(ninp, ntoken, bias=False)
+        linear_layer = nn.Linear(embedding_size, num_tokens, bias=False)
         # Optionally tie weights as in:
         # "Using the Output Embedding to Improve Language Models" (Press & Wolf 2016)
         # https://arxiv.org/abs/1608.05859
         # and
         # "Tying Word Vectors and Word Classifiers: A Loss Framework for Language Modeling" (Inan et al. 2016)
         # https://arxiv.org/abs/1611.01462
+        self.decoder_is_sequential = True
         if tie_weights:
-            if nhid != ninp:
-                logging.info(
-                    "Adding additional linear layer to transform hidden size to embedding size"
-                )
-                decoder_list.append(nn.Linear(nhid, ninp))
-            linear_layer.weight = self.encoder.weight
+            linear_layer.weight = embedding_layer.weight
+
+            if hidden_size != embedding_size:
+                if up_project_hidden:
+                    self.decoder_is_sequential = False
+                    logging.info("Decoder: adding linear transformation to up project embedding to to hidden")
+                    decoder_list.append(nn.Linear(embedding_size, hidden_size))
+                else:
+                    logging.info("Decoder: adding linear transformation to down project hidden to embedding")
+                    decoder_list.append(nn.Linear(hidden_size, embedding_size))
 
         decoder_list.append(linear_layer)
-        self.decoder = nn.Sequential(*decoder_list)
+        if self.decoder_is_sequential:
+            self.decoder = nn.Sequential(*decoder_list)
+        else:
+            self.decoder = nn.ModuleList(decoder_list)
+
+        self.rnn_type = rnn_type
+        self.nhid = hidden_size
+        self.nlayers = num_layers
 
         self.init_weights()
 
-        self.rnn_type = rnn_type
-        self.nhid = nhid
-        self.nlayers = nlayers
-
     def init_weights(self):
-        initrange = 0.1
-        self.encoder.weight.data.uniform_(-initrange, initrange)
-        for m in self.decoder:
-            if m.bias is not None:
-                m.bias.data.zero_()
-            m.weight.data.uniform_(-initrange, initrange)
+        initrange = 1 / self.nhid
+
+        def init_layers(layer):
+            if isinstance(layer, (torch.nn.Sequential, torch.nn.ModuleList)):
+                [init_layers(l) for l in layer]
+            else:
+                layer.weight.data.uniform_(-initrange, initrange)
+                if hasattr(layer, "bias") and layer.bias is not None:
+                    layer.bias.data.zero_()
+
+        init_layers(self.decoder)
+        init_layers(self.encoder)
 
     def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         emb = self.input_dropout(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.output_dropout(output)
-        decoded = self.decoder(output)
+        if self.decoder_is_sequential:
+            decoded = self.decoder(output)
+        else:
+            embedding_weight = self.decoder[1].weight
+            embedding_transform_layer = self.decoder[0]
+            embedding_up_projected = embedding_transform_layer(embedding_weight)
+            decoded = torch.matmul(output, embedding_up_projected.t())
         return decoded, hidden
 
     def init_hidden(self, bsz):
