@@ -2,6 +2,7 @@ from typing import Tuple, List, Optional
 
 import torch
 import torch.nn as nn
+
 import sequence_dropout
 
 """
@@ -109,7 +110,7 @@ class LSTM(nn.Module):
                     lstm_h_list[index][layer_index],
                     lstm_c_list[index][layer_index],
                 )
-                h_0, c_0 = self.recurrent_dropout(h_0), self.recurrent_dropout(c_0)
+                h_0, c_0 = self.recurrent_dropout(h_0), c_0  # self.recurrent_dropout(c_0)
                 h_1, c_1 = layer(lstm_input, (h_0, c_0))
                 lstm_h_list[index + 1][layer_index] = h_1.clone()
                 lstm_c_list[index + 1][layer_index] = c_1.clone()
