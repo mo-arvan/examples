@@ -157,9 +157,7 @@ output_dir = os.path.expanduser(output_dir)
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-logging.basicConfig(filename="output_log",
-                    filemode='a',
-                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+logging.basicConfig(format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
                     datefmt='%H:%M:%S',
                     level=logging.DEBUG)
 logging.getLogger().setLevel(logging.DEBUG)
