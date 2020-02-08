@@ -166,6 +166,7 @@ file_handler = logging.FileHandler(output_dir + '/output.log')
 file_handler.setLevel(logging.DEBUG)
 logging.getLogger().addHandler(file_handler)
 
+logging.info("Output dir: {}".format(output_dir))
 # Set the random seed manually for reproducibility.
 torch.manual_seed(args.seed)
 if torch.cuda.is_available():
@@ -393,6 +394,8 @@ def train():
         # for p in model.parameters():
         #     p.data.add_(-lr, p.grad.data)
         optimizer.step()
+        if isinstance(lr_scheduler, torch.optim.lr_scheduler.CyclicLR):
+            lr_scheduler.step()
 
         total_loss += loss.item()
         if batch % args.log_interval == 0 and batch > 0:
@@ -430,7 +433,7 @@ def export_onnx(path, batch_size, seq_len):
 
 # Loop over epochs.
 best_val_loss = None
-
+last_epoch_model_saved = 10
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     for epoch in range(1, args.epochs + 1):
@@ -446,18 +449,29 @@ try:
         )
         logging.info("-" * 89)
         # Save the model if the validation loss is the best we've seen so far.
-        lr_scheduler.step(val_loss)
-        if not best_val_loss or val_loss < best_val_loss:
-            with open(args.save, "wb") as f:
+        if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            lr_scheduler.step(val_loss)
+        if (epoch - last_epoch_model_saved > 10) and (not best_val_loss or val_loss < best_val_loss):
+            file_name = output_dir + "/" + str(epoch) + "_" + args.save
+            logging.info("Saving model: {}".format(file_name))
+            with open(file_name, "wb") as file:
                 torch.save(
-                    {
-                        "step": epoch,
-                        "model_state_dict": model.state_dict(),
-                        # 'optimizer_state_dict': optimizer.state_dict()
-                    },
-                    f,
-                )
+                    {"step": epoch,
+                     "model_state_dict": model.state_dict(),
+                     'optimizer_state_dict': optimizer.state_dict()},
+                    file)
+            last_epoch_model_saved = epoch
             best_val_loss = val_loss
+
+        if isinstance(lr_scheduler,
+                      torch.optim.lr_scheduler.ReduceLROnPlateau) and (
+                lr_scheduler.optimizer.param_groups[0]["lr"] == args.lr_schedule_min_lr):
+            logging.info("Switching to CyclicLR")
+            lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer,
+                                                             base_lr=args.lr_schedule_min_lr * 1e-1,
+                                                             max_lr=args.lr_schedule_min_lr,
+                                                             step_size_up=500,
+                                                             cycle_momentum=False)
 
         # if isinstance(optimizer, torch.optim.Adam) and (epoch > .8 * args.epochs or
         #                                                 lr_scheduler.optimizer.param_groups[0][
@@ -491,8 +505,8 @@ except KeyboardInterrupt:
     logging.info("Exiting from training early")
 
 # Load the best saved model.
-with open(args.save, "rb") as f:
-    checkpoint = torch.load(f)
+with open(args.save, "rb") as file:
+    checkpoint = torch.load(file)
     model.load_state_dict(checkpoint["model_state_dict"])
     # after load the rnn params are not a continuous chunk of memory
     # this makes them a continuous chunk, and will speed up forward pass
