@@ -28,7 +28,7 @@ class SequenceDropout(torch.nn.Dropout):
         if not self.training:
             return x
         if self.new_mask:
-            self.mask = torch.zeros_like(x).bernoulli_(p=1 - self.p)
+            self.mask = torch.nn.functional.dropout(torch.ones_like(x), p=self.p)
             self.new_mask = False
 
         return x * self.mask
