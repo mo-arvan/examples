@@ -95,14 +95,14 @@ class RNNModel(nn.Module):
     def init_weights(self):
         def init_layers(layer, stddev):
             if isinstance(layer, (torch.nn.Sequential, torch.nn.ModuleList)):
-                [init_layers(l) for l in layer]
+                [init_layers(l, stddev) for l in layer]
             else:
-                layer.weight.data.normal(mean=0, std=stddev)
+                layer.weight.data.normal_(mean=0, std=stddev)
                 if hasattr(layer, "bias") and layer.bias is not None:
                     layer.bias.data.zero_()
 
-        init_layers(self.encoder, stddev=torch.sqrt(1 / self.embedding_size))
-        init_layers(self.decoder, stddev=torch.sqrt(1 / self.embedding_size))
+        init_layers(self.encoder, stddev=math.sqrt(1 / self.embedding_size))
+        init_layers(self.decoder, stddev=math.sqrt(1 / self.embedding_size))
 
     def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
