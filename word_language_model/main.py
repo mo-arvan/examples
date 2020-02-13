@@ -119,6 +119,7 @@ parser.add_argument(
     default=2,
     help="the number of heads in the encoder/decoder of the transformer model",
 )
+parser.add_argument("--optimizer", type=str, default="adam")
 
 parser.add_argument("--lr_schedule_mode", type=str, default="min")
 parser.add_argument("--lr_schedule_factor", type=float, default=0.5)
@@ -130,7 +131,7 @@ parser.add_argument("--lr_schedule_cooldown", type=int, default=0)
 parser.add_argument("--lr_schedule_min_lr", type=float, default=0.0005)
 parser.add_argument("--lr_schedule_eps", type=float, default=1e-08)
 
-parser.add_argument("--lr_asgd", type=float, default=7.5)
+parser.add_argument("--lr_asgd", type=float, default=1)
 
 parser.add_argument("--up_project_embedding", type=bool, default=False)
 parser.add_argument("--up_project_hidden", type=bool, default=False)
@@ -284,12 +285,22 @@ else:
 
 optimizer_grouped_parameters = get_param_weight_decay_dict(no_decay_weights)
 
-optimizer = torch.optim.Adam(
-    params=optimizer_grouped_parameters,
-    lr=args.lr,
-    betas=(0.0, 0.999),
-    eps=1e-9,
-)
+if args.optimizer == "adam":
+    optimizer = torch.optim.Adam(
+        params=optimizer_grouped_parameters,
+        lr=args.lr,
+        betas=(0.0, 0.999),
+        eps=1e-9,
+    )
+elif args.optimizer == "adam_w":
+    optimizer = torch.optim.AdamW(
+        params=optimizer_grouped_parameters,
+        lr=args.lr,
+        betas=(0.0, 0.999),
+        eps=1e-9,
+    )
+else:
+    raise ValueError("Invalid args for optimizer {}".format(args.optimizer))
 
 lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
@@ -433,13 +444,24 @@ def export_onnx(path, batch_size, seq_len):
 
 # Loop over epochs.
 best_val_loss = None
-last_epoch_model_saved = 10
 # At any point you can hit Ctrl + C to break out of training early.
 try:
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
+
+        if isinstance(optimizer, torch.optim.ASGD):
+            tmp = {}
+            for prm in model.parameters():
+                tmp[prm] = prm.data.clone()
+                prm.data = optimizer.state[prm]['ax'].clone()
+
         val_loss = evaluate(val_data, eval_batch_size)
+
+        if isinstance(optimizer, torch.optim.ASGD):
+            for prm in model.parameters():
+                prm.data = tmp[prm].clone()
+
         logging.info("-" * 89)
         logging.info(
             "| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | "
@@ -451,8 +473,8 @@ try:
         # Save the model if the validation loss is the best we've seen so far.
         if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
             lr_scheduler.step(val_loss)
-        if (epoch - last_epoch_model_saved > 10) and (not best_val_loss or val_loss < best_val_loss):
-            file_name = output_dir + "/" + str(epoch) + "_" + args.save
+        if not best_val_loss or val_loss < best_val_loss:
+            file_name = output_dir + "/" + args.save
             logging.info("Saving model: {}".format(file_name))
             with open(file_name, "wb") as file:
                 torch.save(
@@ -460,42 +482,43 @@ try:
                      "model_state_dict": model.state_dict(),
                      'optimizer_state_dict': optimizer.state_dict()},
                     file)
-            last_epoch_model_saved = epoch
+            # last_epoch_model_saved = epoch
             best_val_loss = val_loss
 
-        if isinstance(lr_scheduler,
-                      torch.optim.lr_scheduler.ReduceLROnPlateau) and (
-                lr_scheduler.optimizer.param_groups[0]["lr"] == args.lr_schedule_min_lr):
-            logging.info("Switching to CyclicLR")
-            lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer,
-                                                             base_lr=args.lr_schedule_min_lr * 1e-1,
-                                                             max_lr=args.lr_schedule_min_lr,
-                                                             step_size_up=500,
-                                                             cycle_momentum=False)
+        # if isinstance(lr_scheduler,
+        #               torch.optim.lr_scheduler.ReduceLROnPlateau) and (
+        #         lr_scheduler.optimizer.param_groups[0]["lr"] == args.lr_schedule_min_lr):
+        #     logging.info("Switching to CyclicLR")
+        #     lr_scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer,
+        #                                                      base_lr=args.lr_schedule_min_lr * 1e-1,
+        #                                                      max_lr=args.lr_schedule_min_lr,
+        #                                                      step_size_up=500,
+        #                                                      cycle_momentum=False)
 
-        # if isinstance(optimizer, torch.optim.Adam) and (epoch > .8 * args.epochs or
-        #                                                 lr_scheduler.optimizer.param_groups[0][
-        #                                                     "lr"] == args.lr_schedule_min_lr):
-        #     print('Switching to ASGD')
-        #     optimizer = torch.optim.ASGD(
-        #         params=model.parameters(),
-        #         lr=args.lr_asgd,
-        #         t0=0,
-        #         lambd=0.,
-        #         weight_decay=args.weight_decay,
-        #     )
-        #     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        #         optimizer,
-        #         mode=args.lr_schedule_mode,
-        #         factor=args.lr_schedule_factor,
-        #         patience=args.lr_schedule_patience,
-        #         verbose=args.lr_schedule_verbose,
-        #         threshold=args.lr_schedule_threshold,
-        #         threshold_mode=args.lr_schedule_threshold_mode,
-        #         cooldown=args.lr_schedule_cooldown,
-        #         min_lr=args.lr_schedule_min_lr,
-        #         eps=args.lr_schedule_eps,
-        #     )
+        if isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)) and (epoch > .8 * args.epochs or
+                                                                             lr_scheduler.optimizer.param_groups[0][
+                                                                                 "lr"] == args.lr_schedule_min_lr):
+            logging.info('Switching to ASGD')
+            optimizer = torch.optim.ASGD(
+                params=model.parameters(),
+                lr=args.lr_asgd,
+                t0=0,
+                lambd=0.,
+                weight_decay=args.weight_decay,
+            )
+            lr_scheduler = None
+            # lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            #     optimizer,
+            #     mode=args.lr_schedule_mode,
+            #     factor=args.lr_schedule_factor,
+            #     patience=args.lr_schedule_patience,
+            #     verbose=args.lr_schedule_verbose,
+            #     threshold=args.lr_schedule_threshold,
+            #     threshold_mode=args.lr_schedule_threshold_mode,
+            #     cooldown=args.lr_schedule_cooldown,
+            #     min_lr=args.lr_asgd * 1e-1,
+            #     eps=args.lr_schedule_eps,
+            # )
         # else:
         #     # Anneal the learning rate if no improvement has been seen in the validation dataset.
         #     # lr /= 4.0
@@ -505,7 +528,8 @@ except KeyboardInterrupt:
     logging.info("Exiting from training early")
 
 # Load the best saved model.
-with open(args.save, "rb") as file:
+file_name = output_dir + "/" + args.save
+with open(file_name, "rb") as file:
     checkpoint = torch.load(file)
     model.load_state_dict(checkpoint["model_state_dict"])
     # after load the rnn params are not a continuous chunk of memory
