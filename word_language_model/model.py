@@ -108,7 +108,7 @@ class RNNModel(nn.Module):
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
 
         if self.training and torch.rand(1) <= self.drop_state_probability:
-            hidden = self.init_hidden(input.size(0))
+            hidden = self.init_hidden(input.size(1))
 
         emb = self.input_dropout(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
