@@ -20,7 +20,8 @@ class RNNModel(nn.Module):
                  up_project_embedding=False,
                  up_project_hidden=False,
                  tie_weights=False,
-                 lstm_skip_connection=False):
+                 lstm_skip_connection=False,
+                 drop_state_probability=0.01):
         super(RNNModel, self).__init__()
 
         self.input_dropout = nn.Dropout(input_dropout)
@@ -84,28 +85,31 @@ class RNNModel(nn.Module):
         else:
             self.decoder = nn.ModuleList(decoder_list)
 
+        self.embedding_size = embedding_size
         self.rnn_type = rnn_type
         self.nhid = hidden_size
         self.nlayers = num_layers
-
+        self.drop_state_probability = drop_state_probability
         self.init_weights()
 
     def init_weights(self):
-        initrange = 1 / self.nhid
-
-        def init_layers(layer):
+        def init_layers(layer, stddev):
             if isinstance(layer, (torch.nn.Sequential, torch.nn.ModuleList)):
                 [init_layers(l) for l in layer]
             else:
-                layer.weight.data.uniform_(-initrange, initrange)
+                layer.weight.data.normal(mean=0, std=stddev)
                 if hasattr(layer, "bias") and layer.bias is not None:
                     layer.bias.data.zero_()
 
-        init_layers(self.decoder)
-        init_layers(self.encoder)
+        init_layers(self.encoder, stddev=torch.sqrt(1 / self.embedding_size))
+        init_layers(self.decoder, stddev=torch.sqrt(1 / self.embedding_size))
 
     def forward(self, input: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
         torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+
+        if self.training and torch.rand(1) <= self.drop_state_probability:
+            hidden = self.init_hidden(input.size(0))
+
         emb = self.input_dropout(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
         output = self.output_dropout(output)
