@@ -3,6 +3,7 @@ from typing import Tuple, List, Optional
 import torch
 import torch.nn as nn
 
+import lstm_cell
 import sequence_dropout
 
 """
@@ -21,28 +22,29 @@ class LSTM(nn.Module):
     __constants__ = ["layers"]
 
     def __init__(
-        self,
-        input_size,
-        hidden_size,
-        num_layers=1,
-        bias=True,
-        inter_layer_dropout=0.1,
-        recurrent_dropout=0.0,
-        skip_connection=False,
-        batch_first=False,
+            self,
+            input_size,
+            hidden_size,
+            num_layers=1,
+            bias=True,
+            inter_layer_dropout=0.1,
+            recurrent_dropout=0.0,
+            skip_connection=False,
+            batch_first=False,
     ):
         super(LSTM, self).__init__()
 
         assert (
-            num_layers >= 1 and inter_layer_dropout >= 0.0 and recurrent_dropout >= 0.0
+                num_layers >= 1 and inter_layer_dropout >= 0.0 and recurrent_dropout >= 0.0
         )
-
+        # cell_class = nn.LSTMCell
+        cell_class = lstm_cell.LSTMCell
         self.layers = nn.ModuleList(
-            [nn.LSTMCell(input_size=input_size, hidden_size=hidden_size, bias=bias)]
+            [cell_class(input_size=input_size, hidden_size=hidden_size, bias=bias)]
         )
         for layer in range(num_layers - 1):
             self.layers.append(
-                nn.LSTMCell(input_size=hidden_size, hidden_size=hidden_size, bias=bias)
+                cell_class(input_size=hidden_size, hidden_size=hidden_size, bias=bias)
             )
 
         self.inter_layer_dropout = nn.Dropout(p=inter_layer_dropout)
@@ -54,9 +56,9 @@ class LSTM(nn.Module):
         self.batch_first = batch_first
 
     def forward(
-        self,
-        input: torch.Tensor,
-        hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+            self,
+            input: torch.Tensor,
+            hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
 
