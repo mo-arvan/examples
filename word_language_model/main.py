@@ -136,6 +136,8 @@ parser.add_argument("--lr_asgd", type=float, default=1)
 parser.add_argument("--up_project_embedding", type=bool, default=False)
 parser.add_argument("--up_project_hidden", type=bool, default=False)
 
+parser.add_argument("--drop_state_probability", type=float, default=0.01)
+
 args = parser.parse_args()
 
 
@@ -248,6 +250,7 @@ else:
         up_project_hidden=args.up_project_hidden,
         tie_weights=args.tied,
         lstm_skip_connection=args.lstm_skip_connection,
+        drop_state_probability=args.drop_state_probability
     )
 
 if args.jit_forward:
