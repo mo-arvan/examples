@@ -1,11 +1,11 @@
 # coding: utf-8
+import os
+
 import argparse
 import datetime
 import logging
 import math
-import os
 import time
-
 import torch
 import torch.jit
 import torch.nn as nn
@@ -35,12 +35,11 @@ parser.add_argument("--nlayers", type=int, default=2, help="number of layers")
 
 parser.add_argument("--lr", type=float, default=0.001, help="initial learning rate")
 parser.add_argument("--clip", type=float, default=10, help="gradient clipping")
-parser.add_argument(
-    "--weight_decay",
-    type=float,
-    default=0.0,
-    help="weight decay used for regularizing the model",
-)
+parser.add_argument("--weight_decay", type=float,
+                    default=0.0, help="weight decay used for regularizing the model")
+
+parser.add_argument("--l2_penalty", type=float,
+                    default=0.0, help="l2 penalty added to the training loss")
 
 parser.add_argument(
     "--weight_decay_mode", type=str, default="all", help="all, all_except_bias, all_except_bias_embedding"
@@ -131,7 +130,7 @@ parser.add_argument("--lr_schedule_cooldown", type=int, default=0)
 parser.add_argument("--lr_schedule_min_lr", type=float, default=0.0005)
 parser.add_argument("--lr_schedule_eps", type=float, default=1e-08)
 
-parser.add_argument("--lr_asgd", type=float, default=1)
+parser.add_argument("--lr_asgd", type=float, default=0.01)
 
 parser.add_argument("--up_project_embedding", type=bool, default=False)
 parser.add_argument("--up_project_hidden", type=bool, default=False)
@@ -374,10 +373,11 @@ def evaluate(data_source, batch_size):
             probabilities += [output_prob_flat[i][targets[i]].item() for i in range(targets.size(0))]
 
     probabilities = torch.tensor(probabilities)
-    min_prob = torch.min(probabilities).item()
-    max_prob = torch.max(probabilities).item()
+    # min_prob = torch.min(probabilities).item()
+    # max_prob = torch.max(probabilities).item()
     median_prob = torch.median(probabilities).item()
-    logging.info("Min: {}, Max: {}, Median: {}".format(min_prob, max_prob, median_prob))
+    var, mean = torch.var_mean(probabilities)
+    logging.info("mean: {}, var: {}, median: {}".format(mean.item(), var.item(), median_prob))
     return total_loss / (len(data_source) - 1)
 
 
@@ -401,6 +401,11 @@ def train():
             hidden = repackage_hidden(hidden)
             output, hidden = model(data, hidden)
         loss = criterion(output.view(-1, ntokens), targets)
+
+        if args.l2_penalty > 0.0:
+            loss = loss + args.l2_penalty * torch.tensor(
+                [p.norm() for p in model.parameters() if p.requires_grad]).sum()
+
         loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs / LSTMs.
@@ -445,6 +450,13 @@ def export_onnx(path, batch_size, seq_len):
     torch.onnx.export(model, (dummy_input, hidden), path)
 
 
+def print_model_info(model):
+    for n, p in model.named_parameters():
+        var, mean = torch.var_mean(p)
+        logging.info("{}_mean: {}".format(n, mean.item()))
+        logging.info("{}_var: {}".format(n, var.item()))
+
+
 # Loop over epochs.
 best_val_loss = None
 # At any point you can hit Ctrl + C to break out of training early.
@@ -452,7 +464,7 @@ try:
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
-
+        print_model_info(model)
         if isinstance(optimizer, torch.optim.ASGD):
             tmp = {}
             for prm in model.parameters():
