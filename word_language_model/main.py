@@ -377,7 +377,7 @@ def evaluate(data_source, batch_size):
     # max_prob = torch.max(probabilities).item()
     median_prob = torch.median(probabilities).item()
     var, mean = torch.var_mean(probabilities)
-    logging.info("mean: {}, var: {}, median: {}".format(mean.item(), var.item(), median_prob))
+    # logging.info("mean: {}, var: {}, median: {}".format(mean.item(), var.item(), median_prob))
     return total_loss / (len(data_source) - 1)
 
 
@@ -464,7 +464,7 @@ try:
     for epoch in range(1, args.epochs + 1):
         epoch_start_time = time.time()
         train()
-        print_model_info(model)
+        # print_model_info(model)
         if isinstance(optimizer, torch.optim.ASGD):
             tmp = {}
             for prm in model.parameters():
