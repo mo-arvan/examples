@@ -194,6 +194,8 @@ class TransformerModel(nn.Module):
         self.ninp = ninp
         self.decoder = nn.Linear(ninp, ntoken)
 
+        self.decoder.weight = self.encoder.weight
+
         self.init_weights()
 
     def _generate_square_subsequent_mask(self, sz):
