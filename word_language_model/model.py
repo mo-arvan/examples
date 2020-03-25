@@ -7,6 +7,18 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import lstm
+import gaussian_noise
+
+
+def get_noise_layer(dropout, noise_std):
+    if dropout > 0.:
+        layer = nn.Dropout(dropout)
+    elif noise_std > 0.:
+        layer = gaussian_noise.GaussianNoise(std=noise_std)
+    else:
+        # Both are zero, nothing  will happen
+        layer = nn.Dropout(dropout)
+    return layer
 
 
 class RNNModel(nn.Module):
@@ -15,8 +27,12 @@ class RNNModel(nn.Module):
     def __init__(self, rnn_type, num_tokens,
                  embedding_size, hidden_size,
                  num_layers,
-                 inter_layer_dropout=0., recurrent_dropout=0.,
-                 input_dropout=0., output_dropout=0.,
+                 input_dropout=0.,
+                 input_noise_std=0.,
+                 recurrent_dropout=0.,
+                 inter_layer_dropout=0.,
+                 output_dropout=0.,
+                 output_noise_std=0.,
                  up_project_embedding=False,
                  up_project_hidden=False,
                  tie_weights=False,
@@ -24,7 +40,11 @@ class RNNModel(nn.Module):
                  drop_state_probability=0.01):
         super(RNNModel, self).__init__()
 
-        self.input_dropout = nn.Dropout(input_dropout)
+        # Making sure either dropout or gaussian noise is activated
+        assert not (input_dropout > 0. and input_noise_std > 0.)
+        assert not (output_dropout > 0. and output_noise_std > 0.)
+
+        self.input_dropout_or_noise = get_noise_layer(input_dropout, input_noise_std)
 
         encoder_layer_list = []
         embedding_layer = nn.Embedding(num_tokens, embedding_size)
@@ -56,7 +76,8 @@ class RNNModel(nn.Module):
                                  options are ['LSTM', 'GRU', 'RNN_TANH' or 'RNN_RELU']""")
             self.rnn = nn.RNN(rnn_input_size, hidden_size, num_layers, nonlinearity=nonlinearity,
                               dropout=inter_layer_dropout)
-        self.output_dropout = nn.Dropout(output_dropout)
+
+        self.output_dropout_or_noise = get_noise_layer(output_dropout, output_noise_std)
 
         decoder_list = []
         linear_layer = nn.Linear(embedding_size, num_tokens, bias=False)
@@ -110,9 +131,9 @@ class RNNModel(nn.Module):
         if self.training and torch.rand(1) <= self.drop_state_probability:
             hidden = self.init_hidden(input.size(1))
 
-        emb = self.input_dropout(self.encoder(input))
+        emb = self.input_dropout_or_noise(self.encoder(input))
         output, hidden = self.rnn(emb, hidden)
-        output = self.output_dropout(output)
+        output = self.output_dropout_or_noise(output)
         if self.decoder_is_sequential:
             decoded = self.decoder(output)
         else:

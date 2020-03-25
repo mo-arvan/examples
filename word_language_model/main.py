@@ -59,11 +59,19 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--inter_layer_dropout",
+    "--input_dropout",
     type=float,
     default=0.0,
-    help="dropout applied to inter layer connection of each LSTM layer",
+    help="dropout applied to the input of LSTM",
 )
+
+parser.add_argument(
+    "--input_noise_std",
+    type=float,
+    default=0.0,
+    help="Standard deviation of the noise added to the input",
+)
+
 parser.add_argument(
     "--recurrent_dropout",
     type=float,
@@ -71,16 +79,22 @@ parser.add_argument(
     help="dropout applied to the recurrent state of of each LSTM layer",
 )
 parser.add_argument(
-    "--input_dropout",
+    "--inter_layer_dropout",
     type=float,
     default=0.0,
-    help="dropout applied to the input of LSTM",
+    help="dropout applied to inter layer connection of each LSTM layer",
 )
 parser.add_argument(
     "--output_dropout",
     type=float,
     default=0.0,
     help="dropout applied to the output of the LSTM",
+)
+parser.add_argument(
+    "--output_noise_std",
+    type=float,
+    default=0.0,
+    help="Standard deviation of the noise applied to the output of the LSTM",
 )
 
 parser.add_argument(
@@ -241,10 +255,12 @@ else:
         embedding_size=args.emsize,
         hidden_size=args.nhid,
         num_layers=args.nlayers,
-        inter_layer_dropout=args.inter_layer_dropout,
-        recurrent_dropout=args.recurrent_dropout,
         input_dropout=args.input_dropout,
+        input_noise_std=args.input_noise_std,
+        recurrent_dropout=args.recurrent_dropout,
+        inter_layer_dropout=args.inter_layer_dropout,
         output_dropout=args.output_dropout,
+        output_noise_std=args.output_noise_std,
         up_project_embedding=args.up_project_embedding,
         up_project_hidden=args.up_project_hidden,
         tie_weights=args.tied,
