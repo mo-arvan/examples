@@ -1,32 +1,29 @@
 # coding: utf-8
-import os
-
 import argparse
 import datetime
 import logging
 import math
+import os
 import time
+
+import numpy as np
 import torch
 import torch.jit
 import torch.nn as nn
 import torch.onnx
 import torch.optim
-import numpy as np
+
 import data
 import model
 
-parser = argparse.ArgumentParser(
-    description="PyTorch Wikitext-2 RNN/LSTM Language Model"
-)
-parser.add_argument(
-    "--data", type=str, default="./data/ptb", help="location of the data corpus"
-)
+parser = argparse.ArgumentParser(description="PyTorch Wikitext-2 RNN/LSTM Language Model")
+
+parser.add_argument("--data", type=str, default="./data/ptb", help="location of the data corpus")
 parser.add_argument(
     "--model",
     type=str,
     default="LSTM",
-    help="type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer, custom_LSTM)",
-)
+    help="type of recurrent net (RNN_TANH, RNN_RELU, LSTM, GRU, Transformer, custom_LSTM)")
 parser.add_argument("--emsize", type=int, default=200, help="size of word embeddings")
 parser.add_argument(
     "--nhid", type=int, default=200, help="number of hidden units per layer"
@@ -162,7 +159,7 @@ def _default_output_dir():
     dir_name = "{model_name}_{dataset_name}_{timestamp}".format(
         model_name=args.model,
         dataset_name=dataset_name.replace("/", "_"),
-        timestamp=datetime.datetime.now().strftime("%Y%m%d_%H%M"),
+        timestamp=datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
     )
     dir_path = os.path.join(".", "out", dir_name)
     return dir_path
@@ -304,22 +301,24 @@ else:
 
 optimizer_grouped_parameters = get_param_weight_decay_dict(no_decay_weights)
 
+
 if args.optimizer == "adam":
-    optimizer = torch.optim.Adam(
-        params=optimizer_grouped_parameters,
-        lr=args.lr,
-        betas=(0.0, 0.999),
-        eps=1e-9,
-    )
+    optimizer_class = torch.optim.Adam
 elif args.optimizer == "adam_w":
-    optimizer = torch.optim.AdamW(
-        params=optimizer_grouped_parameters,
-        lr=args.lr,
-        betas=(0.0, 0.999),
-        eps=1e-9,
-    )
+    optimizer_class = torch.optim.AdamW
 else:
     raise ValueError("Invalid args for optimizer {}".format(args.optimizer))
+
+
+betas = (0.0, 0.999)
+epsilon = 1e-08
+
+optimizer = optimizer_class(
+        params=optimizer_grouped_parameters,
+        lr=args.lr,
+        betas=betas,
+        eps=epsilon)
+
 
 lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer,
@@ -404,7 +403,6 @@ def evaluate(data_source, batch_size, tune_softmax=False):
                 loss_dict[softmax_temp] += len(data) * nll_loss(output_tuned_prob, targets).item()
                 # output_prob_flat = output_flat.softmax(dim=1)
                 # probabilities += [output_prob_flat[i][targets[i]].item() for i in range(targets.size(0))]
-            
 
             # total_loss += len(data) * criterion(output_flat, targets).item()
 
@@ -455,8 +453,6 @@ def train():
         optimizer.step()
         if isinstance(lr_scheduler, torch.optim.lr_scheduler.CyclicLR):
             lr_scheduler.step()
-
-
 
         # total_loss += loss.item()
         # if batch % args.log_interval == 0 and batch > 0:
