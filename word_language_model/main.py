@@ -11,7 +11,7 @@ import torch.jit
 import torch.nn as nn
 import torch.onnx
 import torch.optim
-
+import numpy as np
 import data
 import model
 
@@ -225,6 +225,7 @@ eval_batch_size = 10
 test_batch_size = 1
 
 train_data = batchify(corpus.train, args.batch_size)
+train_eval_data = batchify(corpus.train, eval_batch_size)
 val_data = batchify(corpus.valid, eval_batch_size)
 test_data = batchify(corpus.test, test_batch_size)
 
@@ -273,7 +274,7 @@ if args.jit_forward:
 
 model = model.to(device)
 criterion = nn.CrossEntropyLoss()
-
+nll_loss = nn.NLLLoss()
 n = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 logging.info("Number of trainable parameters: {}".format(n))
@@ -367,14 +368,23 @@ def get_batch(source, i):
     return data, target
 
 
-def evaluate(data_source, batch_size):
+def evaluate(data_source, batch_size, tune_softmax=False):
     # Turn on evaluation mode which disables dropout.
     model.eval()
     total_loss = 0.0
     ntokens = get_ntokens(corpus)
     if args.model != "Transformer":
         hidden = model.init_hidden(batch_size)
-    probabilities = []
+    # probabilities = []
+
+    if tune_softmax:
+        softmax_temps_list = np.arange(0.8, 1.1, 0.02)
+    else:
+        softmax_temps_list = [1]
+    loss_dict = {}
+    for softmax_temp in softmax_temps_list:
+        loss_dict[softmax_temp] = 0.
+
     with torch.no_grad():
         for i in range(0, data_source.size(0) - 1, args.bptt):
             data, targets = get_batch(data_source, i)
@@ -384,17 +394,31 @@ def evaluate(data_source, batch_size):
                 output, hidden = model(data, hidden)
                 hidden = repackage_hidden(hidden)
             output_flat = output.view(-1, ntokens)
-            total_loss += len(data) * criterion(output_flat, targets).item()
-            output_prob_flat = output_flat.softmax(dim=1)
-            probabilities += [output_prob_flat[i][targets[i]].item() for i in range(targets.size(0))]
 
-    probabilities = torch.tensor(probabilities)
+            for softmax_temp in softmax_temps_list:
+                output_flat_tuned = torch.exp(output_flat / softmax_temp)
+                output_flat_tuned_sum = output_flat_tuned.sum(dim=1).unsqueeze(dim=1).expand(-1,
+                                                                                             output_flat_tuned.size(1))
+                output_tuned_prob = torch.log(output_flat_tuned / output_flat_tuned_sum)
+
+                loss_dict[softmax_temp] += len(data) * nll_loss(output_tuned_prob, targets).item()
+                # output_prob_flat = output_flat.softmax(dim=1)
+                # probabilities += [output_prob_flat[i][targets[i]].item() for i in range(targets.size(0))]
+            
+
+            # total_loss += len(data) * criterion(output_flat, targets).item()
+
+    # probabilities = torch.tensor(probabilities)
     # min_prob = torch.min(probabilities).item()
     # max_prob = torch.max(probabilities).item()
-    median_prob = torch.median(probabilities).item()
-    var, mean = torch.var_mean(probabilities)
+    # median_prob = torch.median(probabilities).item()
+    # var, mean = torch.var_mean(probabilities)
     # logging.info("mean: {}, var: {}, median: {}".format(mean.item(), var.item(), median_prob))
-    return total_loss / (len(data_source) - 1)
+    temp, loss = min(loss_dict.items(), key=lambda x: x[1])
+
+    if tune_softmax:
+        logging.info("Optimal Temp: {:5.2f}".format(temp))
+    return loss / (len(data_source) - 1)
 
 
 def train():
@@ -432,24 +456,26 @@ def train():
         if isinstance(lr_scheduler, torch.optim.lr_scheduler.CyclicLR):
             lr_scheduler.step()
 
-        total_loss += loss.item()
-        if batch % args.log_interval == 0 and batch > 0:
-            cur_loss = total_loss / args.log_interval
-            elapsed = time.time() - start_time
-            # lr {:04.4f} |
-            logging.info(
-                "| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | "
-                "loss {:5.2f} | ppl {:8.2f}".format(
-                    epoch,
-                    batch,
-                    len(train_data) // args.bptt,
-                    elapsed * 1000 / args.log_interval,
-                    cur_loss,
-                    math.exp(cur_loss),
-                )
-            )
-            total_loss = 0
-            start_time = time.time()
+
+
+        # total_loss += loss.item()
+        # if batch % args.log_interval == 0 and batch > 0:
+        #     cur_loss = total_loss / args.log_interval
+        #     elapsed = time.time() - start_time
+        #     # lr {:04.4f} |
+        #     logging.info(
+        #         "| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | "
+        #         "loss {:5.2f} | ppl {:8.2f}".format(
+        #             epoch,
+        #             batch,
+        #             len(train_data) // args.bptt,
+        #             elapsed * 1000 / args.log_interval,
+        #             cur_loss,
+        #             math.exp(cur_loss),
+        #         )
+        #     )
+        #     total_loss = 0
+        #     start_time = time.time()
 
 
 def export_onnx(path, batch_size, seq_len):
@@ -487,7 +513,8 @@ try:
                 tmp[prm] = prm.data.clone()
                 prm.data = optimizer.state[prm]['ax'].clone()
 
-        val_loss = evaluate(val_data, eval_batch_size)
+        train_loss = evaluate(train_data, args.batch_size)
+        val_loss = evaluate(val_data, eval_batch_size, tune_softmax=True)
 
         if isinstance(optimizer, torch.optim.ASGD):
             for prm in model.parameters():
@@ -495,9 +522,12 @@ try:
 
         logging.info("-" * 89)
         logging.info(
-            "| end of epoch {:3d} | time: {:5.2f}s | valid loss {:5.2f} | "
-            "valid ppl {:8.2f}".format(
-                epoch, (time.time() - epoch_start_time), val_loss, math.exp(val_loss)
+            "| end of epoch {:3d} | time: {:5.2f}s | "
+            "train loss {:5.2f} | train ppl {:8.2f} | "
+            "valid loss {:5.2f} | valid ppl {:8.2f}".format(
+                epoch, (time.time() - epoch_start_time),
+                train_loss, math.exp(train_loss),
+                val_loss, math.exp(val_loss)
             )
         )
         logging.info("-" * 89)
@@ -570,7 +600,7 @@ with open(file_name, "rb") as file:
         model.rnn.flatten_parameters()
 
 # Run on test data.
-test_loss = evaluate(test_data, test_batch_size)
+test_loss = evaluate(test_data, test_batch_size, tune_softmax=True)
 logging.info("=" * 89)
 logging.info(
     "| End of training | test loss {:5.2f} | test ppl {:8.2f}".format(
