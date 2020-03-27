@@ -6,21 +6,28 @@ import torch.nn as nn
 
 
 class LSTMCell(nn.Module):
-    def __init__(self, input_size, hidden_size, cap_input_gate=True, **kwargs):
+    def __init__(self, input_size, hidden_size, cap_input_gate=True, forget_bias_mean=1., **kwargs):
         super(LSTMCell, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.cap_input_gate = cap_input_gate
+        self.forget_bias_mean = forget_bias_mean
         self.weight_ih = nn.Parameter(torch.Tensor(4 * hidden_size, input_size))
         self.weight_hh = nn.Parameter(torch.Tensor(4 * hidden_size, hidden_size))
         self.bias = nn.Parameter(torch.Tensor(4 * hidden_size))
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.normal_(mean=0, std=stdv)
+        weights_stddev = math.sqrt(1.0 / self.input_size)
+        bias_stddev = math.sqrt(1.0 / self.hidden_size)
+
+        self.weight_ih.data.normal_(mean=0, std=weights_stddev)
+        self.weight_hh.data.normal_(mean=0, std=weights_stddev)
+        self.weight_ih.data.normal_(mean=0, std=weights_stddev)
+
+        self.bias.data.normal_(mean=0, std=bias_stddev)
+        self.bias[self.hidden_size:2 * self.hidden_size].data.normal_(mean=self.forget_bias_mean, std=bias_stddev)
 
     def forward(self, input: torch.Tensor, hx: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
         torch.Tensor, torch.Tensor]:
